@@ -77,7 +77,10 @@ interface NetworkSerializable extends Serializable extends ProxyHost {
 	public var enableAutoReplication(get, set) : Bool;
 	public function alive() : Void; // user defined
 
-	public function networkFlush( ctx : Serializer ) : Void;
+	public var syncBack : Bool;
+	public var syncBackOwner : NetworkSerializable;
+
+	public function networkFlush( ctx : Serializer, finalize : Bool ) : Void;
 	public function networkSync( ctx : Serializer ) : Void;
 	public function networkRPC( ctx : NetworkSerializer, rpcID : Int, clientResult : NetworkHost.NetworkClient ) : Bool;
 	public function networkAllow( op : Operation, propId : Int, client : NetworkSerializable ) : Bool;

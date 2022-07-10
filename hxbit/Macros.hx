@@ -233,7 +233,7 @@ class Macros {
 			case ":notMutable":
 				t.notMutable = true;
 			default:
-				if(m.name.charAt(0) == ":")
+				if(m.name.charAt(0) == ":" && m.name != ":isVar")
 					Context.error("Unsupported network metadata", m.pos);
 			}
 		}
@@ -1198,11 +1198,18 @@ class Macros {
 				@:noCompletion public var __bits2 : Int = 0;
 				@:noCompletion public var __next : hxbit.NetworkSerializable;
 				@:noCompletion public function networkSetBit( b : Int ) {
-					if( __host != null && @:privateAccess __host.checkSyncingProperty(b) && (__host.isAuth || @:privateAccess __host.checkWrite(this,b)) && (__next != null || @:privateAccess __host.mark(this)) ) {
-						if( b < 30 ) __bits1 |= 1 << b else __bits2 |= 1 << (b-30);
+					if ( __host != null
+						&& @:privateAccess __host.checkSyncingProperty( b )
+						&& ( __host.isAuth || @:privateAccess __host.checkWrite( this, b ) ) ) {
+						@:privateAccess __host.mark( this );
+						if ( b < 30 ) __bits1 |= 1 << b else __bits2 |= 1 << ( b - 30 );
 					}
 				}
 				public var enableReplication(get, set) : Bool;
+				
+				public var syncBack : Bool = true;
+				public var syncBackOwner : NetworkSerializable;
+
 				public var enableAutoReplication(get, set) : Bool;
 				inline function get_enableReplication() return __host != null;
 				inline function get_enableAutoReplication() return __next == this;
@@ -1418,12 +1425,21 @@ class Macros {
 				}
 
 				var forwardRPC = macro {
-					var __ctx = @:privateAccess __host.beginRPC(this,$v{id},$resultCall);
-					$b{[
-						for( a in f.args )
-							withPos(macro hxbit.Macros.serializeValue(__ctx, $i{a.name}), f.expr.pos)
-					] };
-					@:privateAccess __host.endRPC();
+					function sendOut( __ctx : hxbit.NetworkSerializable.NetworkSerializer ) {
+						var __ctx = @:privateAccess __host.beginRPC(this,__ctx,$v{id},$resultCall);
+						$b{[
+							for( a in f.args )
+								withPos(macro hxbit.Macros.serializeValue(__ctx, $i{a.name}), f.expr.pos)
+						] };
+						@:privateAccess __host.endRPC(__ctx);
+					}
+					if ( __host.isAuth && __host.isAutoOwner ) {
+						for( client in __host.clientsOwners)
+							if ( client.ctx.refs.exists( this.__uid ) )
+								sendOut(client.ctx);
+					}  else {
+						sendOut(null);
+					}
 				};
 
 				if( hasReturnVal && r.mode != Server && r.mode != Owner )
@@ -1527,7 +1543,7 @@ class Macros {
 				if( hasReturnVal ) {
 					exprs.push({ expr : EVars([ { name : "result", type : f.ret, expr : fcall } ]), pos : p } );
 					exprs.push(macro {
-						@:privateAccess __clientResult.beginRPCResult();
+						@:privateAccess __clientResult.beginRPCResult(__ctx);
 						hxbit.Macros.serializeValue(__ctx, result);
 					});
 				} else {
@@ -1596,6 +1612,16 @@ class Macros {
 				}
 
 				rpcCases.push({ values : [{ expr : EConst(CInt(""+id)), pos : p }], guard : null, expr : { expr : EBlock(exprs), pos : p } });
+				var prop = "networkProp" + r.f.name.charAt( 0 ).toUpperCase() + r.f.name.substr( 1 );
+				fields.push( {
+					name : prop,
+					pos : pos,
+					meta : [{ name : ":s", pos : p }],
+					kind : FVar(
+						macro : Int, macro $v{id}
+					),
+					access : [APublic],
+				} );
 
 			default:
 				Context.error("Cannot use @:rpc on non function", r.f.pos);
@@ -1608,7 +1634,7 @@ class Macros {
 
 		if( fields.length != 0 || !isSubSer ) {
 			if( isSubSer ) {
-				flushExpr.unshift(macro super.networkFlush(ctx));
+				flushExpr.unshift(macro super.networkFlush(ctx, finalize));
 				syncExpr.unshift(macro super.networkSync(ctx));
 			} else {
 				flushExpr.unshift(macro {
@@ -1621,10 +1647,12 @@ class Macros {
 						ctx.addInt(__bits2);
 					}
 				});
-				flushExpr.push(macro {
-					__bits1 = 0;
-					__bits2 = 0;
-				});
+				flushExpr.push( macro {
+					if ( finalize ) {
+						__bits1 = 0;
+						__bits2 = 0;
+					}
+				} );
 			}
 			flushExpr.unshift(macro var b1 = __bits1, b2 = __bits2);
 			fields.push({
@@ -1633,7 +1661,7 @@ class Macros {
 				access : access,
 				meta : noComplete,
 				kind : FFun({
-					args : [ { name : "ctx", type : macro : hxbit.Serializer } ],
+					args : [ { name : "ctx", type : macro : hxbit.Serializer }, {name : "finalize", type : macro : Bool } ],
 					ret : null,
 					expr : { expr : EBlock(flushExpr), pos : pos },
 				}),
@@ -1704,7 +1732,8 @@ class Macros {
 				kind : FFun({
 					args : [ { name : "__ctx", type : macro : hxbit.NetworkSerializable.NetworkSerializer }, { name : "__id", type : macro : Int }, { name : "__clientResult", type : macro : hxbit.NetworkHost.NetworkClient } ],
 					ret : macro : Bool,
-					expr : if( isSubSer && firstRPCID > 0 ) macro { if( __id < $v { firstRPCID } ) return super.networkRPC(__ctx, __id, __clientResult); $swExpr; return true; } else macro { $swExpr; return true; }
+					expr : if ( isSubSer && firstRPCID > 0 ) macro {if ( __id < $v{firstRPCID} ) return
+						super.networkRPC( __ctx, __id, __clientResult ); $swExpr; return true;} else macro {$swExpr; return true;}
 				}),
 			});
 		}
