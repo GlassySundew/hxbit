@@ -1433,7 +1433,7 @@ class Macros {
 						] };
 						@:privateAccess __host.endRPC(__ctx);
 					}
-					if ( __host.isAuth && __host.isAutoOwner ) {
+					if ( __host.isAuth && __host.isChannelingEnabled ) {
 						for( client in __host.clientsOwners)
 							if ( client.ctx.refs.exists( this.__uid ) )
 								sendOut(client.ctx);

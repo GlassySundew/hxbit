@@ -92,7 +92,7 @@ class NetworkClient {
 				var oid = ctx.getUID();
 
 				var ctx = host.ctx;
-				if ( host.isAuth && host.isAutoOwner ) {
+				if ( host.isAuth && host.isChannelingEnabled ) {
 					ctx = host.clientsOwners[ownerId].ctx;
 					ctx.setInput( host.ctx.input, host.ctx.inPos );
 				}
@@ -225,7 +225,7 @@ class NetworkClient {
 				var oid = ctx.getUID();
 
 				var ctx = host.ctx;
-				if ( host.isAuth && host.isAutoOwner ) {
+				if ( host.isAuth && host.isChannelingEnabled ) {
 					ctx = host.clientsOwners[ownerId].ctx;
 					ctx.setInput( host.ctx.input, host.ctx.inPos );
 				}
@@ -260,7 +260,7 @@ class NetworkClient {
 				var oid = ctx.getUID();
 
 				var ctx = host.ctx;
-				if ( host.isAuth && host.isAutoOwner ) {
+				if ( host.isAuth && host.isChannelingEnabled ) {
 					ctx = host.clientsOwners[ownerId].ctx;
 					ctx.setInput( host.ctx.input, host.ctx.inPos );
 				}
@@ -423,9 +423,9 @@ class NetworkHost {
 
 	public static var CLIENT_TIMEOUT = 60. * 60.; // 1 hour timeout
 
-	public var isAutoOwner( get, never ) : Bool;
+	public var isChannelingEnabled( get, never ) : Bool;
 
-	inline function get_isAutoOwner() return true;
+	inline function get_isChannelingEnabled() return true;
 
 	public var checkEOM( get, never ) : Bool;
 
@@ -675,11 +675,11 @@ class NetworkHost {
 		if ( !pendingClients.remove( c ) )
 			return;
 
-		if ( isAuth && isAutoOwner ) clientsOwners[c.ownerObject.__uid] = c;
+		if ( isAuth && isChannelingEnabled ) clientsOwners[c.ownerObject.__uid] = c;
 
 		flush();
 
-		var ctx = ( isAuth && isAutoOwner ) ? c.ctx : this.ctx;
+		var ctx = ( isAuth && isChannelingEnabled ) ? c.ctx : this.ctx;
 		// unique client sequence number
 
 		var seq = clients.length + 1;
@@ -882,7 +882,7 @@ class NetworkHost {
 			bytes = ctx.out.getBytes();
 			ctx.out = new haxe.io.BytesBuffer();
 		}
-		if ( isAuth && isAutoOwner && bytes.length > 0 ) throw "sending data from common context is not allowed";
+		if ( isAuth && isChannelingEnabled && bytes.length > 0 ) throw "sending data from common context is not allowed";
 
 		send( bytes );
 	}
@@ -897,7 +897,7 @@ class NetworkHost {
 		if ( targetClient != null ) {
 			totalSentBytes += ( bytes.length + perPacketBytes );
 			targetClient.send( bytes );
-			if ( isAuth && isAutoOwner && targetClient.ctx.out.length > 0 )
+			if ( isAuth && isChannelingEnabled && targetClient.ctx.out.length > 0 )
 				targetClient.send( fetchClientCtx( targetClient ) );
 		} else {
 			totalSentBytes += ( bytes.length + perPacketBytes ) * clients.length;
@@ -905,7 +905,7 @@ class NetworkHost {
 				totalSentBytes += bytes.length + perPacketBytes; // still count for statistics
 			for ( c in clients ) {
 				c.send( bytes );
-				if ( isAuth && isAutoOwner && c.ctx.out.length > 0 )
+				if ( isAuth && isChannelingEnabled && c.ctx.out.length > 0 )
 					c.send( fetchClientCtx( c ) );
 			}
 		}
@@ -944,7 +944,7 @@ class NetworkHost {
 
 					if ( checkEOM ) ctx.addByte( EOM );
 				}
-				if ( isAuth && isAutoOwner ) {
+				if ( isAuth && isChannelingEnabled ) {
 					for ( i => client in clients ) {
 						if ( client.ctx.refs.exists( o.__uid )
 							&& ( o.syncBack || o.syncBackOwner != client.ownerObject ) ) {
@@ -964,7 +964,7 @@ class NetworkHost {
 
 	inline function getOwnerUid() : UID {
 		return
-			if ( isAutoOwner )
+			if ( isChannelingEnabled )
 				if ( isAuth )
 					-1
 				else self.ownerObject.__uid
