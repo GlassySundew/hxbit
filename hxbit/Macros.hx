@@ -1780,6 +1780,10 @@ class Macros {
 					}
 					return b;
 				}
+				
+				public var syncBack : Bool = true;
+				public var syncBackOwner : NetworkSerializable;
+				
 				public function networkCancelProperty( props : hxbit.NetworkSerializable.NetworkProperty ) {
 					var b = props.toInt();
 					if( b < 30 ) __bits1 &= ~(1<<b) else __bits2 &= ~(1<<(b-30));

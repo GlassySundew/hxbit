@@ -914,7 +914,7 @@ class NetworkHost {
 		}
 	}
 
-	function register( o : NetworkSerializable ) {
+	function register( o : NetworkSerializable, client : NetworkClient ) {
 		o.__host = this;
 		var o2 = globalCtx.refs[o.__uid];
 		if( o2 != null ) {
@@ -934,6 +934,9 @@ class NetworkHost {
 			return;
 		}
 		logRegister(o);
+		#if hxbit_visibility
+		var ctx = client.ctx;
+		#end
 		ctx.addByte(REG);
 		ctx.addAnyRef(o);
 		if( checkEOM ) ctx.addByte(EOM);
@@ -962,6 +965,7 @@ class NetworkHost {
 		var prev = null;
 		var h = markHead;
 		while( h != o ) {
+			if ( h == null ) break;
 			prev = h;
 			h = h.__next;
 		}
@@ -1139,12 +1143,18 @@ class NetworkHost {
 						if( o.__bits1 | o.__bits2 == 0 )
 							continue;
 						@:privateAccess ctx.visibilityGroups = newGroups;
+
+			
 					}
 				#end
+
+				if ( !isAuth &&  o.syncBack || o.syncBackOwner != c.ownerObject ) {
 					ctx.addByte(SYNC);
 					ctx.addUID(o.__uid);
 					o.networkFlush(ctx);
 					if( checkEOM ) ctx.addByte(EOM);
+				}
+				
 				#if hxbit_visibility
 				}
 				o.__dirtyVisibilityGroups = 0;
@@ -1221,14 +1231,16 @@ class NetworkHost {
 	#end
 
 	static function enableReplication( o : NetworkSerializable, b : Bool ) {
-		if( b ) {
-			if( o.__host != null ) return;
-			if( current == null ) throw "No NetworkHost defined";
-			current.register(o);
-		} else {
-			if( o.__host == null ) return;
-			o.__host.unregister(o);
-		}
+		// trace("should not register!");
+		
+		// if( b ) {
+		// 	if( o.__host != null ) return;
+		// 	if( current == null ) throw "No NetworkHost defined";
+		// 	current.register(o);
+		// } else {
+		// 	if( o.__host == null ) return;
+		// 	o.__host.unregister(o);
+		// }
 	}
 
 
