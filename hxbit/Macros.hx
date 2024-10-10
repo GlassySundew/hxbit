@@ -2061,7 +2061,7 @@ class Macros {
 							$forwardRPC;
 							return;
 						}
-						$doCall;
+						// $doCall; похоже что в широ не пишут код, где репликаторы живут вне репликации
 					}
 				case Server:
 					macro {

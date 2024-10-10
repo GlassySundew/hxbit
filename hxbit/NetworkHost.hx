@@ -659,7 +659,7 @@ class NetworkHost {
 	function beforeRPC(o:NetworkSerializable, id:Int) {
 		flushProps();
 		if( logger != null )
-			logger("RPC > " + objStr(o) + " " + o.networkGetName(id,true));
+			logger("RPC > " + o.__next + " " + objStr(o) + " " + o.networkGetName(id,true));
 	}
 
 	function beginRPC(ctx:NetworkSerializer,o:NetworkSerializable, id:Int, onResult:NetworkSerializer->Void) {
@@ -988,7 +988,7 @@ class NetworkHost {
 		return false;
 	}
 
-	function unregister( o : NetworkSerializable ) {
+	function unregister( o : NetworkSerializable, ?ctxOvvr:NetworkSerializer ) {
 		if( o.__host == null )
 			return;
 		if( !isAuth && !o.networkAllow(Unregister,0,self.ownerObject) )
@@ -1014,23 +1014,34 @@ class NetworkHost {
 			}
 		}
 		flushProps(); // send changes
-		o.__host = null;
+		// o.__host = null;
 		o.__bits1 = 0;
 		o.__bits2 = 0;
 		unmark(o);
 		if( logger != null )
 			logger("Unregister " + objStr(o));
-		#if hxbit_visibility
-		for( c in clients ) {
-			var ctx = c.ctx;
-			if( !ctx.refs.exists(o.__uid) ) continue;
-		#end
+
+		inline function unreg(ctx:NetworkSerializer) {
 			ctx.addByte(UNREG);
 			ctx.addUID(o.__uid);
 			if( checkEOM ) ctx.addByte(EOM);
 			ctx.refs.remove(o.__uid);
-		#if hxbit_visibility
 		}
+
+		#if hxbit_visibility
+		if ( ctxOvvr != null ) {
+			if ( ctxOvvr.refs.exists( o.__uid ) ) {
+				unreg( ctxOvvr );
+			}
+		} else {
+			for ( c in clients ) {
+				var ctx = c.ctx;
+				if ( !ctx.refs.exists( o.__uid ) ) continue;
+				unreg( ctx );
+			}
+		}
+		#else
+		unreg( ctx );
 		#end
 	}
 
@@ -1146,17 +1157,16 @@ class NetworkHost {
 
 			
 					}
+					if ( !isAuth && o.syncBack || o.syncBackOwner != c.ownerObject ) {
 				#end
 
-				if ( !isAuth &&  o.syncBack || o.syncBackOwner != c.ownerObject ) {
-					ctx.addByte(SYNC);
-					ctx.addUID(o.__uid);
-					o.networkFlush(ctx);
-					if( checkEOM ) ctx.addByte(EOM);
-				}
-				
+						ctx.addByte( SYNC );
+						ctx.addUID( o.__uid );
+						o.networkFlush( ctx );
+						if ( checkEOM ) ctx.addByte( EOM );
+
 				#if hxbit_visibility
-				}
+				}}
 				o.__dirtyVisibilityGroups = 0;
 				#end
 			}
