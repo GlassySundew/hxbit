@@ -101,7 +101,7 @@ class NetworkClient {
 			var oid = ctx.getUID();
 			var o : hxbit.NetworkSerializable = cast ctx.refs[oid];
 			if( o == null ) {
-				host.logError("Could not sync object", oid);
+				host.logError("Could not sync object: " + o, oid);
 				return -1; // discard whole data, might skip some other things
 			}
 			var rawBits = ctx.getInt();
@@ -589,7 +589,9 @@ class NetworkHost {
 	}
 
 	public dynamic function logError( msg : String, ?objectId : UID ) {
-		throw msg + (objectId == null ? "":  "(" + objectId + ")");
+		#if hxbit_report_errors
+		trace( msg + (objectId == null ? "":  "(" + objectId + ")"));
+		#end
 	}
 
 	public dynamic function onMessage( from : NetworkClient, msg : Dynamic ) {
@@ -1157,7 +1159,7 @@ class NetworkHost {
 
 			
 					}
-					if ( !isAuth && o.syncBack || o.syncBackOwner != c.ownerObject ) {
+					if ( (o.syncBack || o.syncBackOwner != c.ownerObject ) ) {
 				#end
 
 						ctx.addByte( SYNC );

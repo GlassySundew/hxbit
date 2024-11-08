@@ -116,9 +116,10 @@ abstract ArrayProxy<T>(ArrayProxyData<T>) to ProxyChild {
 		return this.array.pop();
 	}
 
-	public inline function push( x : T ) {
-		this.array.push(x);
+	public inline function push( x : T ) : Int {
+		var result = this.array.push(x);
 		this.mark();
+		return result;
 	}
 
 	public inline function remove( x : T ) {
