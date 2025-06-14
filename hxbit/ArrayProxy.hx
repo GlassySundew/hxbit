@@ -41,13 +41,11 @@ class ArrayProxyData<T> extends BaseProxy {
 class ArrayProxyIterator<T> {
 	public var a : Array<T>;
 	public var index : Int;
-	public var count : Int;
 	public inline function new(a) {
 		this.a = a;
 		this.index = 0;
-		this.count = a.length;
 	}
-	public inline function hasNext() return index < count;
+	public inline function hasNext() return index < a.length;
 	public inline function next() return a[index++];
 }
 
@@ -68,6 +66,10 @@ abstract ArrayProxy<T>(ArrayProxyData<T>) to ProxyChild {
 
 	public function copy() {
 		return new ArrayProxy(new ArrayProxyData(this.array.copy()));
+	}
+
+	public inline function getArray() {
+		return __value;
 	}
 
 	public function filter( t : T->Bool ) {
@@ -204,6 +206,10 @@ abstract ArrayProxy2<T:ProxyChild>(ArrayProxyData<T>) to ProxyChild {
 		this = a;
 	}
 
+	public inline function getArray() {
+		return __value;
+	}
+
 	inline function bind(v:T) {
 		if( v != null ) v.bindHost(this, 0);
 	}
@@ -325,6 +331,10 @@ abstract ArrayProxy2<T:ProxyChild>(ArrayProxyData<T>) to ProxyChild {
 	@:noCompletion public inline function bindHost(o,bit) {
 		this.obj = o;
 		this.bit = bit;
+	}
+
+	@:noCompletion public inline function unbindHost() {
+		this.obj = null;
 	}
 
 	@:arrayAccess inline function get(idx:Int) {
