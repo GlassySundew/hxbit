@@ -620,6 +620,9 @@ class NetworkHost {
 	public dynamic function onSync( obj : hxbit.NetworkSerializable, bits1 : Int, bits2 : Int ) {
 	}
 
+	public dynamic function onAlive( obj : hxbit.NetworkSerializable ) {
+	}
+
 	public function sendMessage( msg : Dynamic, ?to : NetworkClient ) {
 		flush();
 		var prev = targetClient;
@@ -794,6 +797,8 @@ class NetworkHost {
 			var n = #if haxe4 Std.downcast #else Std.instance #end (o, NetworkSerializable);
 			if( n == null ) continue;
 			n.alive();
+			onAlive(n);
+
 		}
 		while( aliveEvents.length > 0 )
 			aliveEvents.shift()();
