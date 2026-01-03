@@ -54,6 +54,7 @@ enum RpcMode {
 		When called on the server: will forward the call to the clients (and force its execution), then execute.
 	*/
 	Immediate;
+	NotOwner;
 }
 
 enum PropTypeDesc<PropType> {
@@ -1797,6 +1798,7 @@ class Macros {
 						case EConst(CIdent("server")): mode = Server;
 						case EConst(CIdent("owner")): mode = Owner;
 						case EConst(CIdent("immediate")): mode = Immediate;
+						case EConst(CIdent("not_owner")): mode = NotOwner;
 						default:
 							Context.error("Unexpected Rpc mode : should be all|clients|server|owner|immediate", meta.params[0].pos);
 						}
@@ -2160,7 +2162,7 @@ class Macros {
 							$forwardRPC;
 							return;
 						}
-						// $doCall; похоже что в широ не пишут код, где репликаторы живут вне репликации
+						$doCall; // if called while not connected to host, will throw
 					}
 				case Server:
 					macro {
@@ -2188,6 +2190,36 @@ class Macros {
 									__host.setTargetOwner(null);
 								}
 							});
+							if( networkAllow(Ownership, $v{id}, __host.self.ownerObject) )
+								$doCall;
+						} else {
+							if( !networkAllow(RPCOwner, $v{id}, __host.self.ownerObject) ) {
+								var fieldName = networkGetName($v{id}, true);
+								__host.logError('Calling the RPC $fieldName on a not allowed object');
+								return;
+							}
+							// might ping-pong, but need to preserve order
+							$forwardRPC;
+						}
+					}
+				case NotOwner:
+					macro {
+						if( __host == null )
+							return; // no distant target possible (networkAllow = false)
+						if( __host.isAuth ) {
+							// multiple forward possible
+							@:privateAccess __host.dispatchClients(
+								function(client) {
+
+									if( networkAllow(Ownership,$v{id},client.ownerObject) )
+										return;
+
+									if( __host.setTargetOwner(client.ownerObject) )
+										$forwardRPC;
+
+									__host.setTargetOwner(null);
+								}
+							);
 							if( networkAllow(Ownership, $v{id}, __host.self.ownerObject) )
 								$doCall;
 						} else {
@@ -2289,6 +2321,33 @@ class Macros {
 										__host.setTargetOwner(null);
 									}
 								});
+								// only execute if ownership
+								if( !networkAllow(Ownership, $v{id}, __host.self.ownerObject) )
+									return true;
+							}
+							$fcall;
+						});
+					case NotOwner:
+						// check again when receiving the RPC if we are on the good owner
+						// the server might relay to the actual owner or simply drop if not connected
+						exprs.push(macro {
+							if( __host != null && __host.isAuth ) {
+								// check again
+								if( !networkAllow(RPC, $v{id}, __host.rpcClient.ownerObject) )
+									return false;
+								// multiple forward possible
+								@:privateAccess __host.dispatchClients(
+									function(client) {
+											
+										if( networkAllow(Ownership,$v{id},client.ownerObject) ) 
+											return;
+										
+										if( __host.setTargetOwner(client.ownerObject) )
+											$forwardRPC;
+
+										__host.setTargetOwner(null);
+									}
+								);
 								// only execute if ownership
 								if( !networkAllow(Ownership, $v{id}, __host.self.ownerObject) )
 									return true;
