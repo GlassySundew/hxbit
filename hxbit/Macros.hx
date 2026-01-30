@@ -2272,7 +2272,7 @@ class Macros {
 					e.pos = p;
 					exprs.push(e);
 				}
-				exprs.push(macro if( __ctx.error ) return false);
+				exprs.push(macro if( __ctx.error ) {});
 				exprs.push(macro if( __host != null ) __host.makeAlive());
 				if( returnVal.call ) {
 					exprs.push(macro {
@@ -2606,9 +2606,27 @@ class Macros {
 				access : access,
 				meta : noComplete,
 				kind : FFun({
-					args : [ { name : "__ctx", type : macro : hxbit.NetworkSerializable.NetworkSerializer }, { name : "__id", type : macro : Int }, { name : "__clientResult", type : macro : hxbit.NetworkHost.NetworkClient } ],
+					args : [ { 
+						name : "__ctx", 
+						type : macro : hxbit.NetworkSerializable.NetworkSerializer }, 
+						{ 
+							name : "__id", 
+							type : macro : Int 
+						}, { 
+							name : "__clientResult", 
+							type : macro : hxbit.NetworkHost.NetworkClient 
+						} 
+					],
 					ret : macro : Bool,
-					expr : if( isSubSer && firstRPCID > 0 ) macro { if( __id < $v { firstRPCID } ) return super.networkRPC(__ctx, __id, __clientResult); $swExpr; return true; } else macro { $swExpr; return true; }
+					expr : if( isSubSer && firstRPCID > 0 ) macro { 
+						if( __id < $v { firstRPCID } ) 
+							return super.networkRPC(__ctx, __id, __clientResult); 
+						$swExpr; 
+						return true; 
+					} else macro { 
+						$swExpr; 
+						return true;
+					}
 				}),
 			});
 		}
