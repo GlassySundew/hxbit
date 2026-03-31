@@ -26,11 +26,13 @@ class NetworkClient {
 
 	var host : NetworkHost;
 	var resultID : Int;
+	var processID : Int;
 	var needAlive : Bool;
 	var wasSync : Bool;
 	public var seqID : Int;
 	public var ownerObject(default,set) : NetworkSerializable;
 	public var lastMessage : Float;
+	public var lastSentMessage : Float;
 	#if hxbit_visibility
 	public var ctx : NetworkSerializable.NetworkSerializer;
 	#end
@@ -67,6 +69,7 @@ class NetworkClient {
 	function set_ownerObject(o) {
 		#if hxbit_visibility
 		ctx.currentTarget = o;
+		ctx.cachedVisibility = new Serializer.UIDMap();
 		#end
 		return ownerObject = o;
 	}
@@ -75,6 +78,7 @@ class NetworkClient {
 		#if !hxbit_visibility
 		var ctx = host.ctx;
 		#end
+		var pid = ++processID;
 		ctx.setInput(bytes, pos);
 		ctx.errorPropId = -1;
 
@@ -90,7 +94,7 @@ class NetworkClient {
 
 		if( !wasSync && !host.isAuth ) {
 			switch( mid ) {
-			case NetworkHost.FULLSYNC, NetworkHost.MSG, NetworkHost.BMSG:
+			case NetworkHost.FULLSYNC, NetworkHost.MSG, NetworkHost.BMSG, NetworkHost.PING, NetworkHost.PONG:
 			default:
 				host.logError("Message "+mid+" was received before sync");
 			}
@@ -219,8 +223,12 @@ class NetworkClient {
 				ctx.newObjects = [];
 			};
 			var sign = ctx.getBytes();
-			if( sign.compare(Serializer.getSignature()) != 0 )
-				host.logError("Network signature mismatch");
+			if( sign.compare(Serializer.getSignature()) != 0 ) {
+				var host = host;
+				stop();
+				host.onInvalidSignature();
+				return -1;
+			}
 			ctx.enableChecks = false;
 			while( true ) {
 				var o = ctx.getAnyRef();
@@ -230,12 +238,14 @@ class NetworkClient {
 			var first = @:privateAccess ctx.newObjects[0];
 			host.makeAlive();
 			host.onFullSync(cast first);
+			if( host == null ) return -1; // disconnect during fullsync
 			host.receivingClient = this;
 		case NetworkHost.RPC:
 			var oid = ctx.getUID();
 			var o : hxbit.NetworkSerializable = cast ctx.refs[oid];
 			var size = ctx.getInt32();
 			var fid = ctx.getByte();
+			host.rpcObject = o;
 			if( o == null ) {
 				if( size < 0 )
 					throw "RPC on unreferenced object cannot be skip on this platform";
@@ -250,6 +260,7 @@ class NetworkClient {
 				o.networkRPC(ctx, fid, this); // ignore result (client made an RPC on since-then removed object - it has been canceled)
 				host.rpcClientValue = null;
 			}
+			host.rpcObject = null;
 			if( host.logger != null && o != null )
 				host.logger("RPC < " + host.objStr(o) + " " + o.networkGetName(fid,true));
 		case NetworkHost.RPC_WITH_RESULT:
@@ -260,35 +271,42 @@ class NetworkClient {
 			var o : hxbit.NetworkSerializable = cast ctx.refs[oid];
 			var size = ctx.getInt32();
 			var fid = ctx.getByte();
+			host.rpcObject = o;
 			if( o == null ) {
 				if( size < 0 )
 					throw "RPC on unreferenced object cannot be skip on this platform";
 				if( !host.isAuth )
 					host.logError("RPC @" + fid + " on unreferenced object", oid);
 				ctx.skip(size);
+				host.targetClient = this;
 				ctx.addByte(NetworkHost.CANCEL_RPC);
 				ctx.addInt(resultID);
 			} else if( !host.isAuth ) {
 				if( !o.networkRPC(ctx, fid, this) ) {
 					host.logError("RPC " + o.networkGetName(fid,true) + " on " + o + " has unreferenced object parameter");
+					host.targetClient = this;
 					ctx.addByte(NetworkHost.CANCEL_RPC);
 					ctx.addInt(resultID);
 				}
 			} else {
 				host.rpcClientValue = this;
 				if( !o.networkRPC(ctx, fid, this) ) {
+					host.targetClient = this;
 					ctx.addByte(NetworkHost.CANCEL_RPC);
 					ctx.addInt(resultID);
 				}
+				if( host == null ) return -1; // disconnect in rpc
 				host.rpcClientValue = null;
 			}
+			host.rpcObject = null;
 
 			if( host.logger != null && o != null )
 				host.logger("RPC < " + host.objStr(o) + " " + o.networkGetName(fid,true));
 
 			if( resultID != -1 ) {
+				// targetClient was set by beginRPCResult
+				if( host.targetClient == null ) throw "assert";
 				if( host.checkEOM ) ctx.addByte(NetworkHost.EOM);
-
 				host.doSend();
 				host.targetClient = null;
 			}
@@ -315,6 +333,17 @@ class NetworkClient {
 			var msg = ctx.getBytes();
 			host.onMessage(this, msg);
 
+		case NetworkHost.PING:
+			ctx.addByte(NetworkHost.PONG);
+			if( host.checkEOM ) ctx.addByte(NetworkHost.EOM);
+
+		case NetworkHost.PONG:
+			// nothing
+
+		case NetworkHost.PING_READY:
+			// discard extra time
+			lastMessage = haxe.Timer.stamp();
+
 		#if hxbit_visibility
 		case NetworkHost.VIS_RESET:
 			var oid = ctx.getUID();
@@ -322,23 +351,33 @@ class NetworkClient {
 			var groups = ctx.getInt();
 			if( o != null ) {
 				var mask = o.getVisibilityMask(groups) & ~o.getVisibilityMask(0);
+				var old = o.__host;
+				o.__host = null;
 				for( i in 0...64 ) {
-					if( (mask >> i).low & 1 != 0 ) {
+					var im = mask >> i;
+					if( im == 0 ) break;
+					if( im.low & 1 != 0 ) {
 						var f = o.networkGetName(i);
-						Reflect.setField(o, f, null);
+						Reflect.setProperty(o, f, null);
 					}
 				}
+				o.__host = old;
 			}
 		#end
 
 		case x:
 			error("Unknown message code " + x+" @"+pos+":"+bytes.toHex());
 		}
+
+		if( processID != pid )
+			error("Network data was reentrant");
+
 		return ctx.getPosition();
 	}
 
 	function beginRPCResult() {
-		host.flush();
+		host?.flush();
+		if( host == null ) return; // disconnect in RPC
 
 		if( host.logger != null )
 			host.logger("RPC RESULT #" + resultID);
@@ -358,8 +397,13 @@ class NetworkClient {
 		}
 		resultID = rpc;
 		beginRPCResult();
+		if( host == null ) {
+			// was disconnected
+			resultID = -1;
+			return null;
+		}
 		resultID = prevID;
-		return null;
+		return rpc;
 	}
 
 	function endAsyncRPCResult() {
@@ -392,8 +436,10 @@ class NetworkClient {
 	}
 
 	function processMessagesData( data : haxe.io.Bytes, pos : Int, length : Int ) {
-		if( length > 0 )
-			lastMessage = haxe.Timer.stamp();
+		if( length > 0 ) {
+			var now = haxe.Timer.stamp();
+			if( lastMessage < now ) lastMessage = now else lastMessage -= 1; // if we receive while we are in extra time, let's accelerate
+		}
 		if( host == null )
 			return;
 		var end = pos + length;
@@ -420,10 +466,15 @@ class NetworkClient {
 		}
 	}
 
+	public function timeout() {
+		stop();
+	}
+
 	public function stop() {
 		if( host == null ) return;
 		host.clients.remove(this);
 		host.pendingClients.remove(this);
+		if( host.rpcClientValue == this ) host.rpcClientValue = null;
 		host = null;
 	}
 
@@ -443,9 +494,10 @@ class NetworkHost {
 	static inline var BMSG		 = 9;
 	static inline var CANCEL_RPC = 12;
 	static inline var VIS_RESET	 = 13;
+	static inline var PONG		 = 0xFC;
+	static inline var PING_READY = 0xFD;
+	static inline var PING		 = 0xFE;
 	static inline var EOM		 = 0xFF;
-
-	public static var CLIENT_TIMEOUT = 60. * 60.; // 1 hour timeout
 
 	public var checkEOM(get, never) : Bool;
 	inline function get_checkEOM() return true;
@@ -466,9 +518,32 @@ class NetworkHost {
 	**/
 	public var rpcClient(get, never) : NetworkClient;
 
+	/**
+		When a RPC is being called, this is the object which received the RPC.
+	**/
+	public var rpcObject : NetworkSerializable;
+
 	public var sendRate : Float = 0.;
 	public var totalSentBytes : Int = 0;
 	public var syncingProperties = false;
+
+	/**
+		Set a regular ping if no other data was sent during this time. Prevent clientTimeout from occuring.
+		(default : 10s)
+	**/
+	public var autoPingTime : Float = 10;
+
+	/**
+		How much time before a client that didn't sent any data is automaticaly disconnected (default : 60s)
+	**/
+	public var clientTimeout : Float = 60;
+
+	/**
+		Gives additional timeout delay after sending a fullSync to a client. (default: 5min)
+		The client can call ping(true) to indicate that its ready and cancel the extra time.
+	**/
+	public var fullSyncExtraTime : Float = 60 * 5;
+
 	var isDispatching = false;
 
 	/*
@@ -478,8 +553,9 @@ class NetworkHost {
 	var isSyncingProperty : Int = -1;
 
 	var perPacketBytes = 20; // IP + UDP headers
-	var lastSentTime : Float = 0.;
 	var lastSentBytes = 0;
+	var lastSentTime : Float;
+	var currentTime : Float;
 	var markHead : NetworkSerializable;
 	var registerHead : NetworkSerializable;
 	var ctx : NetworkSerializer;
@@ -508,6 +584,7 @@ class NetworkHost {
 	public function new() {
 		current = this;
 		isAuth = true;
+		lastSentTime = haxe.Timer.stamp();
 		self = new NetworkClient(this);
 		clients = [];
 		aliveEvents = [];
@@ -538,6 +615,12 @@ class NetworkHost {
 				return c;
 		return null;
 	}
+
+	#if hxbit_visibility
+	public function matchClient(obj,from:Serializable.MarkParam) {
+		return resolveClient(obj)?.ctx.cachedVisibility == from;
+	}
+	#end
 
 	public function resetState() {
 		hxbit.Serializer.resetCounters();
@@ -602,10 +685,28 @@ class NetworkHost {
 		return rpcClientValue == null ? self : rpcClientValue;
 	}
 
+	/**
+		This can be used to manually ping the other side.
+		If you set ready to true, it will also reset the extra time that was set for fullsync
+	**/
+	public function ping( ready = false ) {
+		for( c in clients ) {
+			targetClient = c;
+			ctx.addByte(ready ? PING_READY : PING);
+			if( checkEOM ) ctx.addByte(EOM);
+			doSend();
+			targetClient = null;
+		}
+	}
+
 	public dynamic function logError( msg : String, ?objectId : UID ) {
 		#if hxbit_report_errors
 		trace( msg + (objectId == null ? "":  "(" + objectId + ")"));
 		#end
+	}
+
+	public dynamic function onInvalidSignature() {
+		logError("Network signature mismatch");
 	}
 
 	public dynamic function onMessage( from : NetworkClient, msg : Dynamic ) {
@@ -639,26 +740,18 @@ class NetworkHost {
 		targetClient = prev;
 	}
 
-	function setTargetOwner( owner : NetworkSerializable ) {
-		if( !isAuth )
-			return true;
-		if( owner == null ) {
-			doSend();
-			targetClient = null;
-			return true;
-		}
-		flush();
-		targetClient = null;
-		for( c in clients )
-			if( c.ownerObject == owner ) {
-				targetClient = c;
-				break;
-			}
-		return targetClient != null; // owner not connected
+	inline function targetRPC(o:NetworkSerializable, id:Int, onResult:NetworkSerializer->Void, serialize:NetworkSerializer->Void,client:NetworkClient) {
+		targetClient = client;
+		var rpcPosition = beginRPC(ctx, o, id, onResult);
+		#if hxbit_visibility
+		if( rpcPosition < 0 ) return;
+		#end
+		serialize(ctx);
+		endRPC(ctx, rpcPosition);
+		doSend();
 	}
 
 	inline function doRPC(o:NetworkSerializable, id:Int, onResult:NetworkSerializer->Void, serialize:NetworkSerializer->Void) {
-		beforeRPC(o,id);
 		#if hxbit_visibility
 		for( c in clients ) {
 			var ctx = c.ctx;
@@ -757,6 +850,7 @@ class NetworkHost {
 
 		doSend();
 		targetClient = null;
+		c.lastMessage = haxe.Timer.stamp() + fullSyncExtraTime;
 	}
 
 	public function defaultLogger( ?filter : String -> Bool ) {
@@ -950,13 +1044,17 @@ class NetworkHost {
 			}
 			return;
 		}
+		flushRegister(o);
+	}
+
+	function flushRegister( o : NetworkSerializable ) {
 		logRegister(o);
+		globalCtx.addByte(REG);
+		globalCtx.addAnyRef(o);
+		if( checkEOM ) globalCtx.addByte(EOM);
 		#if hxbit_visibility
-		var ctx = client.ctx;
+		@:privateAccess if( isAuth ) globalCtx.out.pos = 0; // reset output
 		#end
-		ctx.addByte(REG);
-		ctx.addAnyRef(o);
-		if( checkEOM ) ctx.addByte(EOM);
 	}
 
 	function logRegister( o : NetworkSerializable ) {
@@ -1043,6 +1141,8 @@ class NetworkHost {
 			ctx.addUID(o.__uid);
 			if( checkEOM ) ctx.addByte(EOM);
 			ctx.refs.remove(o.__uid);
+		#if hxbit_visibility
+			ctx.cachedVisibility.remove(o.__uid);
 		}
 
 		#if hxbit_visibility
@@ -1060,12 +1160,19 @@ class NetworkHost {
 		#else
 		unreg( ctx );
 		#end
+		#if hxbit_visibility
+		globalCtx.refs.remove(o.__uid);
+		#end
 	}
 
-	function doSend() {
+	inline function doSend() {
+		#if hxbit_visibility if( !isAuth ) #end flushSend();
+	}
+
+	function flushSend() {
 		var bytes;
 		@:privateAccess {
-			if( ctx.out.pos == 0 ) return;
+			if( ctx.out.length == 0 ) return;
 			bytes = ctx.out.getBytes();
 			ctx.out = new haxe.io.BytesBuffer();
 		}
@@ -1076,12 +1183,15 @@ class NetworkHost {
 		if( targetClient != null ) {
 			totalSentBytes += (bytes.length + perPacketBytes);
 			targetClient.send(bytes);
+			targetClient.lastSentMessage = currentTime;
 		}
 		else {
 			totalSentBytes += (bytes.length + perPacketBytes) * clients.length;
 			if( clients.length == 0 ) totalSentBytes += bytes.length + perPacketBytes; // still count for statistics
-			for( c in clients )
+			for( c in clients ) {
 				c.send(bytes);
+				c.lastSentMessage = currentTime;
+			}
 		}
 	}
 
@@ -1102,13 +1212,7 @@ class NetworkHost {
 				if( o2 != (o:Serializable) ) logError("Register conflict between objects", o.__uid);
 				continue;
 			}
-			logRegister(o);
-			globalCtx.addByte(REG);
-			globalCtx.addAnyRef(o);
-			if( checkEOM ) globalCtx.addByte(EOM);
-			#if hxbit_visibility
-			@:privateAccess if( isAuth ) globalCtx.out.pos = 0; // reset output
-			#end
+			flushRegister(o);
 		}
 		var o = markHead;
 		while( o != null ) {
@@ -1139,7 +1243,7 @@ class NetworkHost {
 						continue;
 					var ctx = c.ctx;
 					if( isAuth ) {
-						var prevGroups : Int = o.__cachedVisibility == null ? 0 : o.__cachedVisibility.get(ctx.currentTarget);
+						var prevGroups : Int = c.ctx.cachedVisibility.get(o.__uid);
 						var newGroups = @:privateAccess ctx.evalVisibility(o);
 						var mask = o.getVisibilityMask(newGroups);
 						o.__bits1 = bits1 & (mask.low & 0x3FFFFFFF);
@@ -1200,17 +1304,23 @@ class NetworkHost {
 		if( @:privateAccess globalCtx.out.length > 0 ) doSend();
 		#if hxbit_visibility
 		if( isAuth ) {
-			for( c in clients )
+			inline function flushData(c:NetworkClient) {
 				if( @:privateAccess c.ctx.out.length > 0 ) {
 					targetClient = c;
-					doSend();
+					flushSend();
 					targetClient = null;
 				}
+			}
+			for( c in pendingClients )
+				flushData(c);
+			for( c in clients )
+				flushData(c);
 		}
 		#end
 		// update sendRate
 		var now = haxe.Timer.stamp();
 		var dt = now - lastSentTime;
+		currentTime = now;
 		if( dt < 1 )
 			return;
 		var db = totalSentBytes - lastSentBytes;
@@ -1219,13 +1329,28 @@ class NetworkHost {
 			sendRate = rate;
 		else
 			sendRate = sendRate * 0.8 + rate * 0.2; // smooth
-		lastSentTime = now;
-		lastSentBytes = totalSentBytes;
+		if( db > 0 ) {
+			lastSentTime = now;
+			lastSentBytes = totalSentBytes;
+		}
 
 		// check for unresponsive clients (nothing received from them)
-		for( c in clients )
-			if( now - c.lastMessage > CLIENT_TIMEOUT )
-				c.stop();
+		for( c in pendingClients )
+			if( now - c.lastMessage > clientTimeout )
+				c.timeout();
+		for( c in clients ) {
+			if( now - c.lastMessage > clientTimeout )
+				c.timeout();
+			else if( now - c.lastSentMessage > autoPingTime && autoPingTime > 0 ) {
+				var prev = targetClient;
+				targetClient = c;
+				ctx.addByte(PING);
+				if( checkEOM ) ctx.addByte(EOM);
+				doSend();
+				targetClient = prev;
+				c.lastSentMessage = now;
+			}
+		}
 	}
 
 	#if hxbit_visibility
@@ -1238,7 +1363,7 @@ class NetworkHost {
 		}
 		for( o in client.ctx.refs )
 			o.__mark = 0;
-		rootObject.markReferences(markInf, client.ownerObject);
+		rootObject.markReferences(markInf, client.ctx.cachedVisibility);
 		targetClient = client;
 		var toRemove = null;
 		for( key => o in client.ctx.refs ) {
@@ -1248,6 +1373,10 @@ class NetworkHost {
 			if( checkEOM ) ctx.addByte(EOM);
 			if( toRemove == null ) toRemove = [];
 			toRemove.push(key);
+			if( logger != null ) {
+				var ns = Std.downcast(o, NetworkSerializable);
+				logger("UNREF > " + (ns == null ? ""+ns.__uid : objStr(ns)));
+			}
 		}
 		if( toRemove != null ) {
 			for( key in toRemove )

@@ -88,7 +88,6 @@ interface NetworkSerializable extends Serializable extends ProxyHost {
 	public function networkSetBit( bit : Int ) : Void;
 
 	#if hxbit_visibility
-	public var __cachedVisibility : Map<hxbit.NetworkSerializable,Int>;
 	public var __dirtyVisibilityGroups : Int;
 	public function evalVisibility( group : VisibilityGroup, from : NetworkSerializable ) : Bool;
 	public function setVisibilityDirty( group : VisibilityGroup ) : Void;
@@ -147,7 +146,10 @@ class NetworkSerializer extends Serializer {
 	public var enableChecks = true;
 	public var error(get, never) : Bool;
 	public var errorPropId : Int = -1;
+	#if hxbit_visibility
 	public var currentTarget : NetworkSerializable;
+	public var cachedVisibility : Serializer.UIDMap<Int>;
+	#end
 	var host : NetworkHost;
 
 	public function new(host) {
@@ -165,15 +167,13 @@ class NetworkSerializer extends Serializer {
 
 	#if hxbit_visibility
 	static var GROUPS = VisibilityGroup.createAll();
-	override function evalVisibility(s:Serializable):Int {
+	static var GROUP_BITS = GROUPS.length < 16 ? GROUPS.length : 16;
+	static var BITS_CACHE : Array<Null<Int>> = [for( i in 0...(1 << GROUP_BITS) ) i];
+	public var defaultVisibilityMask = 0;
+	override function evalVisibility(ns:NetworkSerializable):Int {
 		if( currentTarget == null )
-			return -1;
-		var ns = Std.downcast(s, NetworkSerializable);
-		if( ns == null )
-			return -1;
-		if( ns.__cachedVisibility == null )
-			ns.__cachedVisibility = new Map();
-		var v = ns.__cachedVisibility.get(currentTarget);
+			return defaultVisibilityMask;
+		var v = cachedVisibility.get(ns.__uid);
 		var bits : Int, mask : Int;
 		if( v != null ) {
 			mask = ns.__dirtyVisibilityGroups;
@@ -187,7 +187,8 @@ class NetworkSerializer extends Serializer {
 		for( i in 0...groups.length )
 			if( mask & (1<<i) != 0 && ns.evalVisibility(groups[i], currentTarget) )
 				bits |= 1 << i;
-		ns.__cachedVisibility.set(currentTarget, bits);
+		if( v == null || (v:Int) != bits )
+			cachedVisibility.set(ns.__uid, (bits >>> GROUP_BITS) == 0 ? BITS_CACHE[bits] : bits);
 		return bits;
 	}
 	#end

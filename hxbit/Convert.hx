@@ -138,7 +138,7 @@ class Convert {
 		case PVector(_): new haxe.ds.Vector<Dynamic>(0);
 		case PBool: false;
 		case PAlias(t), PAliasCDB(t), PNoSave(t): getDefault(t);
-		case PEnum(_), PNull(_), PObj(_), PSerializable(_), PSerInterface(_), PString, PUnknown, PBytes, PDynamic, PCustom, PStruct(_): null;
+		default: null;
 		};
 	}
 
@@ -149,34 +149,38 @@ class Convert {
 
 }
 
-class EnumConvert {
+class TypeConvert {
 
-	public var enumClass : String;
+	public var classValue : Dynamic;
 	public var constructs : Array<Convert>;
 	public var reindex : Array<Int>;
+	public var isStruct : Bool;
 
-	public function new( classPath : String, ourSchema : Schema, schema : Schema ) {
-		this.enumClass = classPath;
+	public function new( classPath : String, classValue : Dynamic, ourSchema : Schema, schema : Schema, isStruct ) {
+		this.isStruct = isStruct;
+		this.classValue = classValue;
 		reindex = [];
 		constructs = [];
 
 		for( index => name in schema.fieldsNames ) {
 			var found = false;
 			var from = schema.fieldsTypes[index];
-			for( i => s in ourSchema.fieldsNames )
-				if( s == name ) {
-					reindex.push(i);
-					var to = ourSchema.fieldsTypes[i];
-					if( to == null && from == null && i == index )
-						constructs.push(null);
-					else
-						constructs.push(new Convert(classPath+"."+name, makeSchema(to), makeSchema(from)));
-					found = true;
-					break;
-				}
+			if( ourSchema != null ) {
+				for( i => s in ourSchema.fieldsNames )
+					if( s == name ) {
+						reindex.push(i);
+						var to = ourSchema.fieldsTypes[i];
+						if( to == null && from == null && i == index )
+							constructs.push(null);
+						else
+							constructs.push(new Convert(name.indexOf('.') > 0 ? name : classPath+"."+name, makeSchema(to), makeSchema(from)));
+						found = true;
+						break;
+					}
+			}
 			if( !found ) {
 				reindex.push(-1);
-				constructs.push(new Convert(classPath+"."+name,makeSchema(null),makeSchema(from)));
+				constructs.push(new Convert(name.indexOf('.') > 0 ? name : classPath+"."+name,makeSchema(null),makeSchema(from)));
 			}
 		}
 	}
@@ -188,8 +192,12 @@ class EnumConvert {
 		case PObj(fields):
 			for( i => f in fields ) {
 				s.fieldsTypes.push(f.type);
-				// don't use field name for now : privilege position over name
-				s.fieldsNames.push("@"+i);
+				if( isStruct )
+					s.fieldsNames.push(f.name);
+				else {
+					// don't use field name for now : privilege position over name
+					s.fieldsNames.push("@"+i);
+				}
 			}
 		default: throw "assert";
 		}
