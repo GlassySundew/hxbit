@@ -1141,8 +1141,10 @@ class NetworkHost {
 			ctx.addUID(o.__uid);
 			if( checkEOM ) ctx.addByte(EOM);
 			ctx.refs.remove(o.__uid);
-		#if hxbit_visibility
+			
+			#if hxbit_visibility
 			ctx.cachedVisibility.remove(o.__uid);
+			#end
 		}
 
 		#if hxbit_visibility

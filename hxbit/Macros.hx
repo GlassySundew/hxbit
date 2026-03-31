@@ -2322,16 +2322,14 @@ class Macros {
 							return; // no distant target possible (networkAllow = false)
 						if( __host.isAuth ) {
 							// multiple forward possible
+							$beforeRPC;
 							@:privateAccess __host.dispatchClients(
 								function(client) {
 
 									if( networkAllow(Ownership,$v{id},client.ownerObject) )
 										return;
-
-									if( __host.setTargetOwner(client.ownerObject) )
-										$forwardRPC;
-
-									__host.setTargetOwner(null);
+									
+									$forwardClient;
 								}
 							);
 							if( networkAllow(Ownership, $v{id}, __host.self.ownerObject) )
@@ -2450,6 +2448,32 @@ class Macros {
 								return true;
 						}
 					});
+				case NotOwner:
+					// check again when receiving the RPC if we are on the good owner
+					// the server might relay to the actual owner or simply drop if not connected
+					exprs.push(macro {
+						if( __host != null && __host.isAuth ) {
+							// check again
+							if( !networkAllow(RPC, $v{id}, __host.rpcClient.ownerObject) )
+								return false;
+							// multiple forward possible
+							$beforeRPC;
+							@:privateAccess __host.dispatchClients(
+								function(client) {
+										
+									if( networkAllow(Ownership,$v{id},client.ownerObject) ) 
+										return;
+									
+									${if( hasResult ) macro var onResult = null else macro null};
+									$forwardClient;
+								}
+							);
+							// only execute if ownership
+							if( !networkAllow(Ownership, $v{id}, __host.self.ownerObject) )
+								return true;
+						}
+						// $fcall;
+					});
 				case Clients:
 					exprs.push(macro {
 						if( __host != null && __host.isAuth ) return false;
@@ -2491,97 +2515,8 @@ class Macros {
 						@:privateAccess __clientResult.beginRPCResult();
 						hxbit.Macros.serializeValue(__ctx, result);
 					});
-				} else {
-
-					// -- when receiving the rpc, check for additional security
-
-					switch( r.mode ) {
-					case All:
-						exprs.push(macro {
-							if( __host != null && __host.isAuth ) {
-								// check again
-								if( !networkAllow(RPC,$v{id},__host.rpcClient.ownerObject) )
-									return false;
-								$forwardRPC;
-							}
-							$fcall;
-						});
-					case Owner:
-						// check again when receiving the RPC if we are on the good owner
-						// the server might relay to the actual owner or simply drop if not connected
-						exprs.push(macro {
-							if( __host != null && __host.isAuth ) {
-								// check again
-								if( !networkAllow(RPC, $v{id}, __host.rpcClient.ownerObject) )
-									return false;
-								// multiple forward possible
-								@:privateAccess __host.dispatchClients(function(client) {
-									if( networkAllow(Ownership,$v{id},client.ownerObject) && __host.setTargetOwner(client.ownerObject) ) {
-										$forwardRPC;
-										__host.setTargetOwner(null);
-									}
-								});
-								// only execute if ownership
-								if( !networkAllow(Ownership, $v{id}, __host.self.ownerObject) )
-									return true;
-							}
-							$fcall;
-						});
-					case NotOwner:
-						// check again when receiving the RPC if we are on the good owner
-						// the server might relay to the actual owner or simply drop if not connected
-						exprs.push(macro {
-							if( __host != null && __host.isAuth ) {
-								// check again
-								if( !networkAllow(RPC, $v{id}, __host.rpcClient.ownerObject) )
-									return false;
-								// multiple forward possible
-								@:privateAccess __host.dispatchClients(
-									function(client) {
-											
-										if( networkAllow(Ownership,$v{id},client.ownerObject) ) 
-											return;
-										
-										if( __host.setTargetOwner(client.ownerObject) )
-											$forwardRPC;
-
-										__host.setTargetOwner(null);
-									}
-								);
-								// only execute if ownership
-								if( !networkAllow(Ownership, $v{id}, __host.self.ownerObject) )
-									return true;
-							}
-							$fcall;
-						});
-					case Clients:
-						exprs.push(macro {
-							$fcall;
-						});
-					case Server:
-						exprs.push(macro {
-							if( __host == null || !__host.isAuth || !networkAllow(RPCServer, $v{id}, __host.rpcClient.ownerObject) )
-								return false;
-							$fcall;
-						});
-					case Immediate:
-						exprs.push(macro {
-							if( __host != null && __host.isAuth ) {
-								// check again
-								if( !networkAllow(Ownership,$v{id},__host.rpcClient.ownerObject) )
-									return false;
-
-								@:privateAccess __host.dispatchClients(function(client) {
-									if(client != __host.rpcClient && __host.setTargetOwner(client.ownerObject) ) {
-										$forwardRPC;
-										__host.setTargetOwner(null);
-									}
-								});
-							}
-							$fcall;
-						});
-					}
-				}
+				} else
+					exprs.push(fcall);
 
 				rpcCases.push({ values : [{ expr : EConst(CInt(""+id)), pos : p }], guard : null, expr : { expr : EBlock(exprs), pos : p } });
 
