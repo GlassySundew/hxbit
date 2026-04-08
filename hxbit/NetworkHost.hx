@@ -1025,9 +1025,10 @@ class NetworkHost {
 		}
 	}
 
-	function register( o : NetworkSerializable, client : NetworkClient ) {
+	function register( o : NetworkSerializable, ?ctx : NetworkSerializer ) {
 		o.__host = this;
-		var o2 = globalCtx.refs[o.__uid];
+		final ctx = ctx ?? globalCtx;
+		var o2 = ctx.refs[o.__uid];
 		if( o2 != null ) {
 			if( o2 != (o:Serializable) ) logError("Register conflict between objects", o.__uid);
 			return;
@@ -1044,16 +1045,17 @@ class NetworkHost {
 			}
 			return;
 		}
-		flushRegister(o);
+		flushRegister(o, ctx);
 	}
 
-	function flushRegister( o : NetworkSerializable ) {
+	function flushRegister( o : NetworkSerializable, ?ctx : Serializer ) {
 		logRegister(o);
-		globalCtx.addByte(REG);
-		globalCtx.addAnyRef(o);
-		if( checkEOM ) globalCtx.addByte(EOM);
+		final ctx = ctx ?? globalCtx;
+		ctx.addByte(REG);
+		ctx.addAnyRef(o);
+		if( checkEOM ) ctx.addByte(EOM);
 		#if hxbit_visibility
-		@:privateAccess if( isAuth ) globalCtx.out.pos = 0; // reset output
+		@:privateAccess if( isAuth ) ctx.out.pos = 0; // reset output
 		#end
 	}
 
@@ -1103,9 +1105,10 @@ class NetworkHost {
 		return false;
 	}
 
-	function unregister( o : NetworkSerializable, ?ctxOvvr:NetworkSerializer ) {
+	function unregister( o : NetworkSerializable, ?ctx:NetworkSerializer ) {
 		if( o.__host == null )
 			return;
+	
 		if( !isAuth && !o.networkAllow(Unregister,0,self.ownerObject) )
 			throw "Can't unregister "+o+" without ownership";
 		if( lateRegistration ) {
@@ -1148,13 +1151,13 @@ class NetworkHost {
 		}
 
 		#if hxbit_visibility
-		if ( ctxOvvr != null ) {
-			if ( ctxOvvr.refs.exists( o.__uid ) ) {
-				unreg( ctxOvvr );
+		if ( ctx != null ) {
+			if ( ctx.refs.exists( o.__uid ) ) {
+				unreg( ctx );
 			}
 		} else {
 			for ( c in clients ) {
-				var ctx = c.ctx;
+				final ctx = c.ctx;
 				if ( !ctx.refs.exists( o.__uid ) ) continue;
 				unreg( ctx );
 			}
