@@ -1132,7 +1132,6 @@ class NetworkHost {
 			}
 		}
 		flushProps(); // send changes
-		// o.__host = null;
 		o.__bits1 = 0;
 		o.__bits2 = 0;
 		unmark(o);
@@ -1161,6 +1160,7 @@ class NetworkHost {
 				if ( !ctx.refs.exists( o.__uid ) ) continue;
 				unreg( ctx );
 			}
+			o.__host = null;
 		}
 		#else
 		unreg( ctx );
